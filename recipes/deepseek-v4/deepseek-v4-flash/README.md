@@ -25,7 +25,20 @@ Status: **Experimental** (Day-0). Modality: text only.
    - **B200 variants**: 4 B200 GPUs (x86_64).
    - **GB200 variants**: 4 GB200 GPUs (single NVL4 tray, arm64). Nodes must be labeled `nvidia.com/gpu.product=NVIDIA-GB200` and tainted `kubernetes.io/arch=arm64:NoSchedule` (the manifests carry the matching `nodeSelector` + `toleration`).
 3. **HuggingFace token** with access to `deepseek-ai/DeepSeek-V4-Flash`.
+4. **Container image.** Pick the path that matches your variant:
 
+   - **SGLang B200** (`sglang-agg`): the manifest pulls the prebuilt NGC image `nvcr.io/nvidia/ai-dynamo/sglang-runtime:1.2.0-sglang-deepseek-v4-b200-dev.1` directly — **no build step required.** To rebuild from source (e.g. to pin a custom Dynamo branch or a different SGLang base), see the shared [`recipes/deepseek-v4/container/README.md`](../container/README.md).
+
+   - **SGLang GB200** (`sglang-agg-gb200`): the manifest pulls the prebuilt arm64 NGC image `nvcr.io/nvidia/ai-dynamo/sglang-runtime:1.2.0-sglang-deepseek-v4-gb200-dev.1` directly — same story, **no build step required.**
+
+   - **vLLM** (`vllm-agg-b200` or `vllm-agg-gb200`): Build the standard Dynamo vLLM runtime image per [`<repo_root>/container/README.md`](../../../container/README.md):
+
+     ```bash
+     container/render.py --framework vllm --target runtime --output-short-filename
+     docker build -t dynamo:latest-vllm-runtime -f container/rendered.Dockerfile .
+     ```
+
+     For the GB200 variant, build with `--platform linux/arm64` and ensure the resulting image includes an arm64 build of FlashInfer with the TRT-LLM allreduce kernels. Then set the `image:` fields in your chosen `vllm/agg_*/deploy.yaml` (both Frontend and decode worker) to your pushed image tag.
 
 ## Quick Start
 
@@ -52,6 +65,8 @@ kubectl wait --for=condition=Complete job/model-download -n ${NAMESPACE} --timeo
 ### Deploy — vLLM B200 (`vllm-agg-b200`)
 
 ```bash
+# Update the `image:` fields in vllm/agg_b200/deploy.yaml to your Dynamo + vLLM build
+# (Prerequisite 4 — vLLM path).
 kubectl apply -f vllm/agg_b200/deploy.yaml -n ${NAMESPACE}
 
 # First launch of the decode worker takes up to ~60 minutes (weight load +
@@ -64,6 +79,8 @@ kubectl wait --for=condition=Ready pod \
 ### Deploy — vLLM GB200 (`vllm-agg-gb200`)
 
 ```bash
+# Update the `image:` fields in vllm/agg_gb200/deploy.yaml to your Dynamo + vLLM
+# arm64 build (Prerequisite 4 — vLLM path).
 kubectl apply -f vllm/agg_gb200/deploy.yaml -n ${NAMESPACE}
 
 # First launch ~60 minutes; the manifest's startup probe allows for it.
@@ -246,6 +263,7 @@ If `tool_calls` is missing and raw tool-call markers appear in `content`, confir
 
 ### vLLM-specific
 
+- **Image tag.** Both `vllm/agg_b200/deploy.yaml` and `vllm/agg_gb200/deploy.yaml` ship with `nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag`. Replace with your built Dynamo vLLM runtime tag — see Prerequisite 4. The GB200 manifest expects an arm64 build that includes FlashInfer with the TRT-LLM allreduce kernels.
 - **Engine-ready timeout.** `VLLM_ENGINE_READY_TIMEOUT_S=3600` matches the startup probe budget on both variants.
 - **DP stability (B200 only).** `VLLM_RANDOMIZE_DP_DUMMY_INPUTS=1` and `VLLM_SKIP_P2P_CHECK=1` mirror the DeepSeek-R1 vLLM recipe and stabilize DP dummy inputs. The GB200 variant uses TP (no DP), so `VLLM_RANDOMIZE_DP_DUMMY_INPUTS` is not set.
 - **FlashInfer TRT-LLM allreduce on GB200.** You may see a non-fatal startup warning `Failed to initialize FlashInfer Allreduce norm fusion workspace ... Flashinfer allreduce-norm fusion will be disabled`. vLLM falls back to a non-fused allreduce + RMSNorm; correctness is unaffected. To enable the fused kernel, set the compilation pass: `--compilation-config '{"mode":3,"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"],"pass_config":{"fuse_allreduce_rms":true}}'`.
