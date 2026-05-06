@@ -113,7 +113,9 @@ def resolve_request_force_reasoning(
     if not reasoning_parser_name:
         return False
 
-    kwargs = request.get("chat_template_kwargs") or {}
+    kwargs = (
+        request.get("chat_template_kwargs") or request.get("chat_template_args") or {}
+    )
 
     if reasoning_parser_name in _THINKING_BY_DEFAULT:
         flag_key = (
@@ -256,7 +258,10 @@ def create_parsers(
             )
 
     reasoning_parser = None
-    if reasoning_parser_name:
+    guided_decoding_active = tool_choice == "required" or _is_named_tool_choice(
+        tool_choice
+    )
+    if reasoning_parser_name and not guided_decoding_active:
         reasoning_parser = ReasoningParser(
             model_type=reasoning_parser_name,
             stream_reasoning=True,
@@ -349,7 +354,9 @@ def _render_deepseek_v4_prompt_token_ids(
             encoding_messages.insert(0, {"role": "system", "content": ""})
         encoding_messages[0]["tools"] = template_tools
 
-    chat_template_kwargs = request.get("chat_template_kwargs") or {}
+    chat_template_kwargs = (
+        request.get("chat_template_kwargs") or request.get("chat_template_args") or {}
+    )
     thinking_mode = "thinking" if chat_template_kwargs.get("thinking") else "chat"
     reasoning_effort = (
         request.get("reasoning_effort")
@@ -548,6 +555,14 @@ def preprocess_chat_request(
         }
         if template_tools:
             template_kwargs["tools"] = template_tools
+
+        chat_template_kwargs = (
+            request.get("chat_template_kwargs")
+            or request.get("chat_template_args")
+            or {}
+        )
+        if chat_template_kwargs:
+            template_kwargs.update(chat_template_kwargs)
 
         prompt_token_ids = _normalize_prompt_token_ids(
             tokenizer.apply_chat_template(messages, **template_kwargs)
