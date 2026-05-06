@@ -180,6 +180,9 @@ xfail_strict = true
 log_cli_level = "INFO"
 filterwarnings = [
     "error",
+    # chardet 6.x is pulled in transitively but requests 2.32.x only supports <6;
+    # charset_normalizer is used at runtime so the warning is benign.
+    "ignore:.*doesn't match a supported version",
     # CUDA deprecation warnings from tensorrt_llm
     "ignore:.*cuda*:DeprecationWarning",
     # cuda.cudart/cuda.nvrtc deprecated in favor of cuda.bindings.* (cuda-python >=13)
